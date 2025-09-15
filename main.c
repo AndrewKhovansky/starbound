@@ -353,11 +353,6 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	//memset(found_stars, 0x00, sizeof(found_stars));
-
-
-
-
 	if(bmp_img_read(&img, argv[1]) != BMP_OK)
 	{
 		printf("Cannot open BMP file.\r\n");
@@ -374,20 +369,16 @@ int main(int argc, char** argv)
 	int pixelCount = img.img_header.biHeight * img.img_header.biWidth;
 
 	pixels = (Pixel_t*)malloc( sizeof(Pixel_t) * pixelCount );
-	int* intesities_sorted = (int*)malloc( sizeof(int) * pixelCount );
-	unsigned char* pixels_sorted_marks =  calloc( pixelCount , 1 );
-
 
 	int starBufferSize = 100;
 	found_stars = (star_t**)malloc(sizeof(star_t**) * starBufferSize);
 
-	if(!found_stars || !pixels || !intesities_sorted || !pixels_sorted_marks)
+	if(!found_stars || !pixels)
 	{
 		printf("Cannot allocate memory.\r\n");
 		fflush(stdout);
 		return 1;
 	}
-
 
 	int row = 0;
 	int col = 0;
@@ -437,8 +428,8 @@ int main(int argc, char** argv)
 		}
 	}
 
-	stars_count = 0;
 
+	stars_count = 0;
 	for(int i = 0; i < (pixelCount); ++i)
 	{
 		if(pixels[i].processed)
@@ -478,11 +469,19 @@ int main(int argc, char** argv)
 					pixelStrideList = (Pixel_t**)realloc(pixelStrideList, sizeof(Pixel_t**) * pixelStrideListSize);
 				}
 
-			//	lastRow = nextpix->row;
-			//	lastCol = nextpix->col;
-
 				nextpix->color = COLOR_STAR_OUTLINE;
-				set_img_pixel(&img, nextpix->row, nextpix->col, nextpix->color);
+			//	set_img_pixel(&img, nextpix->row, nextpix->col, nextpix->color);
+
+
+				unsigned int r,g,b;
+
+				r = (unsigned int)((nextpix->color >> 16) * nextpix->intensity_normalized);
+				g = (unsigned int)((nextpix->color >> 8) * nextpix->intensity_normalized);
+				b = (unsigned int)((nextpix->color >> 0) * nextpix->intensity_normalized);
+
+				set_img_pixel(&img, nextpix->row, nextpix->col,  (r << 16) ||
+																(g << 8)  ||
+																(b << 0));
 
 				nextpix->processed = 0x01;
 				newStar->pixels[newStar->pixelCount++] = nextpix;
@@ -559,7 +558,6 @@ int main(int argc, char** argv)
 				newStar->centerCol = centerCol / sum_intensity;
 				newStar->centerRow = centerRow / sum_intensity;
 
-
 				newStar->boundRowMin = starBoundRowMin;
 				newStar->boundRowMax = starBoundRowMax;
 				newStar->boundColMin = starBoundColMin;
@@ -567,8 +565,6 @@ int main(int argc, char** argv)
 
 				newStar->sizeCol = starBoundColMax - starBoundColMin;
 				newStar->sizeRow = starBoundRowMax - starBoundRowMin;
-
-
 
 				fprintf(fReport, "Star #%d:\n", (stars_count+1));
 				fprintf(fReport, " Mass center: [%d,%d]\n", newStar->centerRow, newStar->centerCol);
@@ -590,21 +586,12 @@ int main(int argc, char** argv)
 
 					found_stars = (star_t**)realloc((void*)found_stars, starBufferSize * sizeof(star_t**));
 				}
-
-
-
-
-
 			}
 		}
 	}
 
 	for(int i=0; i<stars_count; ++i)
 	{
-		//int lineSize = (found_stars[i]->sizeCol > found_stars[i]->sizeRow)?(found_stars[i]->sizeCol):(found_stars[i]->sizeRow);
-		//int lineSize = (found_stars[i]->sizeCol < found_stars[i]->sizeRow)?(found_stars[i]->sizeCol):(found_stars[i]->sizeRow);
-
-
 		int lineSize = 10;
 
 		//vertical line of cross
@@ -621,7 +608,6 @@ int main(int argc, char** argv)
 					found_stars[i]->centerCol + (lineSize / 2 + 2) + 1,
 					COLOR_STAR_CENTER);
 
-
 		draw_rect(&img, found_stars[i]->boundRowMin - 1,
 					found_stars[i]->boundColMin - 1,
 					found_stars[i]->sizeCol + 2,
@@ -633,9 +619,6 @@ int main(int argc, char** argv)
 					(found_stars[i]->boundColMin - 1),
 					COLOR_STAR_CENTER);
 	}
-
-
-
 
 	bmp_img_write(&img, out_image_name);
 	return 0;
@@ -673,71 +656,4 @@ Pixel_t* strideToNextPixel(Pixel_t* curPixel)
 	}
 
 	return NULL;
-
-
 }
-
-Pixel_t* strideToNextRedPixel(Pixel_t* curPixel)
-{
-	int nextX, nextY;
-	Pixel_t* nextPix;
-
-	nextPix = NULL;
-	for(int i=0; i<8; ++i)
-	{
-		nextX = curPixel->row + deltas[i][0];
-		nextY = curPixel->col + deltas[i][1];
-
-		if (nextX >= img.img_header.biWidth)
-			continue;
-		if (nextY >= img.img_header.biHeight)
-			continue;
-		if (nextX < 0)
-			continue;
-		if (nextY < 0)
-			continue;
-
-		if(getpix(nextX, nextY)->color != COLOR_STAR)
-			continue;
-
-
-
-		//Count adjacent red pixels near the next pixel
-		Pixel_t* nearPix;
-
-		int adj_pixels = 0;
-		nearPix = NULL;
-		for(int i=0; i<8; ++i)
-		{
-			nearPix = getpix(nextX + deltas[i][0], nextY + deltas[i][1]);
-
-			if(nearPix == curPixel) //Way back is closed
-				continue;
-
-			if(nearPix->color == COLOR_STAR)
-			{
-				adj_pixels++;
-			}
-		}
-
-
-		if(adj_pixels == 0)
-		{
-			nearPix = NULL;
-		}
-
-		if(nearPix)
-		{
-			nextPix = getpix(nextX, nextY);
-			break;
-		}
-	}
-
-	return nextPix;
-}
-
-
-
-
-
-
