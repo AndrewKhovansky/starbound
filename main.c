@@ -340,10 +340,11 @@ int getFileNameWithoutExtension(char* in, char* out)
 
 int main(int argc, char** argv)
 {
-
 	char filebase[100];
 	char report_name[256];
 	char out_image_name[256];
+
+	float intensity_threshold;
 
 	if(argc < 2)
 	{
@@ -360,6 +361,22 @@ int main(int argc, char** argv)
 
 		return 1;
 	}
+
+	int relative_intensity = 1;
+	if(argc >= 3)
+	{
+		if(!strstr(argv[2], "x") )
+		{
+			relative_intensity = 0;
+		}
+
+		sscanf(argv[2], "%f", &intensity_threshold);
+	}
+	else
+	{
+		intensity_threshold = 2.0F; //By default, pixels at least 2x brighter than average value are qualified as star pixels
+	}
+
 
 	getFileNameWithoutExtension(argv[1], filebase);
 
@@ -410,15 +427,17 @@ int main(int argc, char** argv)
 
 	average_intensity /= pixelCount;
 
-	FILE* fReport;
 
-	fReport = fopen(report_name, "w");
+	if(relative_intensity)
+	{
+		intensity_threshold =  average_intensity * intensity_threshold;
+	}
 
-	fprintf(fReport, "StarBound v0.2\nInput file: %s\nCoordinate system: Row-Column\nOrigin: Top-Left\nIntensity: 0.000...1.000\n\n", argv[1]);
+
 
 	for(int i=0; i < pixelCount; ++i)
 	{
-		if(pixels[i].intensity_normalized >= average_intensity*2) //Pixels with at least 2x of average intensity qualified as star pixels
+		if(pixels[i].intensity_normalized >= intensity_threshold)
 		{
 			pixels[i].color = COLOR_STAR; //Mark pixel as star pixel
 		}
@@ -470,18 +489,18 @@ int main(int argc, char** argv)
 				}
 
 				nextpix->color = COLOR_STAR_OUTLINE;
-			//	set_img_pixel(&img, nextpix->row, nextpix->col, nextpix->color);
+				//set_img_pixel(&img, nextpix->row, nextpix->col, nextpix->color);
 
 
 				unsigned int r,g,b;
 
-				r = (unsigned int)((nextpix->color >> 16) * nextpix->intensity_normalized);
-				g = (unsigned int)((nextpix->color >> 8) * nextpix->intensity_normalized);
-				b = (unsigned int)((nextpix->color >> 0) * nextpix->intensity_normalized);
+				r = (unsigned int)( (float)((nextpix->color >> 16) & 0xFF) * nextpix->intensity_normalized);
+				g = (unsigned int)( (float)((nextpix->color >> 8) & 0xFF) *  nextpix->intensity_normalized);
+				b = (unsigned int)( (float)((nextpix->color >> 0) & 0xFF) *  nextpix->intensity_normalized);
 
-				set_img_pixel(&img, nextpix->row, nextpix->col,  (r << 16) ||
-																(g << 8)  ||
-																(b << 0));
+				set_img_pixel(&img, nextpix->row, nextpix->col,  ((unsigned int)r << 16) |
+																((unsigned int)g << 8)  |
+																((unsigned int)b << 0));
 
 				nextpix->processed = 0x01;
 				newStar->pixels[newStar->pixelCount++] = nextpix;
@@ -547,12 +566,18 @@ int main(int argc, char** argv)
 
 				float sum_intensity = 0;
 
+				float weight;
+
 				for(int i = 0; i < newStar->pixelCount; ++i)
 				{
-					centerRow += newStar->pixels[i]->row * newStar->pixels[i]->intensity_normalized;
-					centerCol += newStar->pixels[i]->col * newStar->pixels[i]->intensity_normalized;
+				//	weight = newStar->pixels[i]->intensity_normalized;
 
-					sum_intensity += newStar->pixels[i]->intensity_normalized;
+					weight = 1.0f;
+
+					centerRow += newStar->pixels[i]->row * weight;
+					centerCol += newStar->pixels[i]->col * weight;
+
+					sum_intensity += weight;
 				}
 
 				newStar->centerCol = centerCol / sum_intensity;
@@ -566,17 +591,9 @@ int main(int argc, char** argv)
 				newStar->sizeCol = starBoundColMax - starBoundColMin;
 				newStar->sizeRow = starBoundRowMax - starBoundRowMin;
 
-				fprintf(fReport, "Star #%d:\n", (stars_count+1));
-				fprintf(fReport, " Mass center: [%d,%d]\n", newStar->centerRow, newStar->centerCol);
-				fprintf(fReport, " Pixels:\n");
-				for(int i=0; i<newStar->pixelCount; ++i)
-				{
-					fprintf(fReport, "  Pixel %d:\t[%d,%d]\tIntensity: %1.3f\n", (i+1),
-																		newStar->pixels[i]->row,
-																		newStar->pixels[i]->col,
-																		newStar->pixels[i]->intensity_normalized);
-				}
-				fprintf(fReport, "\n");
+
+
+
 
 				found_stars[stars_count++] = newStar;
 
@@ -590,33 +607,57 @@ int main(int argc, char** argv)
 		}
 	}
 
-	for(int i=0; i<stars_count; ++i)
+
+	FILE* fReport;
+
+	fReport = fopen(report_name, "w");
+
+	fprintf(fReport, "StarBound v0.2\nInput file: %s\nCoordinate system: Row-Column\nOrigin: Top-Left\nIntensity: 0.000...1.000\nAverage intensity: %1.3f\nIntensity threshold: %1.3f\n\nStars: %d\n", argv[1], average_intensity, intensity_threshold, stars_count);
+
+
+
+
+	for(int star=0; star<stars_count; ++star)
 	{
 		int lineSize = 10;
 
+		fprintf(fReport, " Star #%d:\n", (star+1));
+		fprintf(fReport, "  Mass center: [%d,%d]\n", found_stars[star]->centerRow, found_stars[star]->centerCol);
+		fprintf(fReport, "  Pixels: %d\n", found_stars[star]->pixelCount);
+		for(int pixel=0; pixel<found_stars[star]->pixelCount; ++pixel)
+		{
+			fprintf(fReport, "   Pixel %d:\t[%d,%d]\tIntensity: %1.3f\n", (pixel+1),
+					found_stars[star]->pixels[pixel]->row,
+					found_stars[star]->pixels[pixel]->col,
+					found_stars[star]->pixels[pixel]->intensity_normalized);
+		}
+		fprintf(fReport, "\n");
+
+
+
 		//vertical line of cross
-		draw_line(&img, found_stars[i]->centerRow - (lineSize / 2 + 2),
-					found_stars[i]->centerCol,
-					found_stars[i]->centerRow + (lineSize / 2 + 2) + 1,
-					found_stars[i]->centerCol,
+		draw_line(&img, found_stars[star]->centerRow - (lineSize / 2 + 2),
+					found_stars[star]->centerCol,
+					found_stars[star]->centerRow + (lineSize / 2 + 2) + 1,
+					found_stars[star]->centerCol,
 					COLOR_STAR_CENTER);
 
 		//horizontal line of cross
-		draw_line(&img, found_stars[i]->centerRow,
-					found_stars[i]->centerCol - (lineSize / 2 + 2),
-					found_stars[i]->centerRow,
-					found_stars[i]->centerCol + (lineSize / 2 + 2) + 1,
+		draw_line(&img, found_stars[star]->centerRow,
+					found_stars[star]->centerCol - (lineSize / 2 + 2),
+					found_stars[star]->centerRow,
+					found_stars[star]->centerCol + (lineSize / 2 + 2) + 1,
 					COLOR_STAR_CENTER);
 
-		draw_rect(&img, found_stars[i]->boundRowMin - 1,
-					found_stars[i]->boundColMin - 1,
-					found_stars[i]->sizeCol + 2,
-					found_stars[i]->sizeRow + 2,
+		draw_rect(&img, found_stars[star]->boundRowMin - 1,
+					found_stars[star]->boundColMin - 1,
+					found_stars[star]->sizeCol + 2,
+					found_stars[star]->sizeRow + 2,
 					COLOR_STAR_CENTER);
 
-		draw_number(&img, (i+1),
-				    found_stars[i]->boundRowMin - 10,
-					(found_stars[i]->boundColMin - 1),
+		draw_number(&img, (star+1),
+				    found_stars[star]->boundRowMin - 10,
+					(found_stars[star]->boundColMin - 1),
 					COLOR_STAR_CENTER);
 	}
 
