@@ -16,10 +16,7 @@
 
 #define COLOR_SKY 0x000000
 #define COLOR_STAR 0xFF0000
-//#define COLOR_STAR_OUTLINE 0xffdc85
 #define COLOR_STAR_OUTLINE 0x0000FF
-
-//#define COLOR_STAR_CENTER 0x73c9ff
 #define COLOR_STAR_CENTER 0xFFFFFF
 
 typedef struct
@@ -570,7 +567,9 @@ int main(int argc, char** argv)
 
 				for(int i = 0; i < newStar->pixelCount; ++i)
 				{
-				//	weight = newStar->pixels[i]->intensity_normalized;
+					//weight = newStar->pixels[i]->intensity_normalized;
+
+					//weight = weight * weight;
 
 					weight = 1.0f;
 
@@ -578,6 +577,8 @@ int main(int argc, char** argv)
 					centerCol += newStar->pixels[i]->col * weight;
 
 					sum_intensity += weight;
+
+				//	sum_intensity += 1.0f;
 				}
 
 				newStar->centerCol = centerCol / sum_intensity;
