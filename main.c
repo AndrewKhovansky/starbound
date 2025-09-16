@@ -19,6 +19,15 @@
 #define COLOR_STAR_OUTLINE 0x0000FF
 #define COLOR_STAR_CENTER 0xFFFFFF
 
+const char* helpString =
+"Syntax: starbound *file_name* [intensity_threshold]\n\n"\
+"*file_name* - path to BMP picture\n"\
+"[intensity_threshold] - optional minumum brightness value for star pixel (0.0...1.0). Can also take a value relative\n"\
+"to the average brightness of picture. In this case, symbol 'x' should be added, e.g. 6.0x.\n\n"\
+"Examples:\n"\
+"starbound sky.bmp 0.1 - absolute threshold\n"
+"starbound sky.bmp 10.0x - relative threshold\n";
+
 typedef struct
 {
 	//int coords[2];
@@ -231,11 +240,6 @@ void draw_rect(bmp_img* img, int row, int col, int w, int h, unsigned int rgb)
 bmp_img img;
 Pixel_t* pixels;
 
-Pixel_t* pixels_sorted;
-
-Pixel_t* starPixels[1024 * 1024];
-unsigned int starPixelsCount = 0;
-
 const int deltas[8][2] = {
 		{0,1},   //Right
 		{-1,1},  //Up-right
@@ -267,8 +271,6 @@ Pixel_t* getpix(int row, int col)
 }
 
 Pixel_t* strideToNextPixel(Pixel_t* curPixel);
-Pixel_t* strideToNextRedPixel(Pixel_t* curPixel);
-
 
 int getFileNameWithoutExtension(char* in, char* out)
 {
@@ -345,8 +347,7 @@ int main(int argc, char** argv)
 
 	if(argc < 2)
 	{
-		printf("No BMP file selected.\r\n");
-
+		printf(helpString);
 		fflush(stdout);
 		return 1;
 	}
@@ -355,7 +356,6 @@ int main(int argc, char** argv)
 	{
 		printf("Cannot open BMP file.\r\n");
 		fflush(stdout);
-
 		return 1;
 	}
 
@@ -620,7 +620,7 @@ int main(int argc, char** argv)
 
 	for(int star=0; star<stars_count; ++star)
 	{
-		int lineSize = 10;
+		//int lineSize = 10;
 
 		fprintf(fReport, " Star #%d:\n", (star+1));
 		fprintf(fReport, "  Mass center: [%d,%d]\n", found_stars[star]->centerRow, found_stars[star]->centerCol);
@@ -634,6 +634,11 @@ int main(int argc, char** argv)
 		}
 		fprintf(fReport, "\n");
 
+
+		int starSizeH = found_stars[star]->boundColMax - found_stars[star]->boundColMin;
+		int starSizeV = found_stars[star]->boundRowMax - found_stars[star]->boundRowMin;
+
+		int lineSize = (starSizeH > starSizeV)?starSizeV:starSizeH;
 
 
 		//vertical line of cross
@@ -650,16 +655,23 @@ int main(int argc, char** argv)
 					found_stars[star]->centerCol + (lineSize / 2 + 2) + 1,
 					COLOR_STAR_CENTER);
 
-		draw_rect(&img, found_stars[star]->boundRowMin - 1,
+	/*	draw_rect(&img, found_stars[star]->boundRowMin - 1,
 					found_stars[star]->boundColMin - 1,
 					found_stars[star]->sizeCol + 2,
 					found_stars[star]->sizeRow + 2,
-					COLOR_STAR_CENTER);
+					COLOR_STAR_CENTER);*/
 
-		draw_number(&img, (star+1),
+		/*draw_number(&img, (star+1),
 				    found_stars[star]->boundRowMin - 10,
 					(found_stars[star]->boundColMin - 1),
-					COLOR_STAR_CENTER);
+					COLOR_STAR_CENTER);*/
+
+
+		draw_number(&img, (star+1),
+					    found_stars[star]->centerRow - 10,
+						(found_stars[star]->centerCol + 2),
+						COLOR_STAR_CENTER);
+
 	}
 
 	bmp_img_write(&img, out_image_name);
@@ -699,3 +711,6 @@ Pixel_t* strideToNextPixel(Pixel_t* curPixel)
 
 	return NULL;
 }
+
+
+
