@@ -668,7 +668,7 @@ int main(int argc, char** argv)
 
 
 		draw_number(&img, (star+1),
-					    found_stars[star]->centerRow - 10,
+					    found_stars[star]->centerRow - 9,
 						(found_stars[star]->centerCol + 2),
 						COLOR_STAR_CENTER);
 
