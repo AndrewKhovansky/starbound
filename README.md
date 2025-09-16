@@ -7,7 +7,7 @@ Usage:
 
 starbound.exe "file_name" [intensity_threshold]
 
-file_name - route to .bmp picture of the sky
+file_name - path to .bmp picture of the sky
 intensity_threshold - optional. Minimum brightness of pixel
  that counts as star pixel. Can take absolute value in range [0.000...1.000]
  or value relative to the average intensity of picture. In this case,
