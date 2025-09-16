@@ -1,6 +1,4 @@
 # starbound
-Night sky analyzer
-
 Utility for counting stars in the sky.
 
 Usage:
