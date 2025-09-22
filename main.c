@@ -20,41 +20,30 @@
 #define COLOR_STAR_CENTER 0xFFFFFF
 
 const char* helpString =
-"Syntax: starbound *file_name* [intensity_threshold]\n\n"\
+"\nSyntax: starbound *file_name* *intensity_threshold* *star_size_min*\n\n"\
 "*file_name* - path to BMP picture\n"\
-"[intensity_threshold] - optional minumum brightness value for star pixel (0.0...1.0). Can also take a value relative\n"\
-"to the average brightness of picture. In this case, symbol 'x' should be added, e.g. 6.0x.\n\n"\
+"*intensity_threshold* - minumum brightness for star pixel (0.0...1.0). Can also take a value relative\n"\
+"to the average brightness of picture. In this case, symbol 'x' should be added, e.g. 6.0x.\n"\
+"*star_size_min* - minimum star size in pixels.\n\n"\
 "Examples:\n"\
-"starbound sky.bmp 0.1 - absolute threshold\n"
-"starbound sky.bmp 10.0x - relative threshold\n";
+"starbound sky.bmp 0.1 3 - absolute threshold 0.1, minumum star size is 3px\n"
+"starbound sky.bmp 10.0x 12 - relative threshold 10x, minumum star size is 12px\n";
 
 typedef struct
 {
-	//int coords[2];
-
 	int row;
 	int col;
-
-	//unsigned int R;
-	//unsigned int G;
-	//unsigned int B;
 
 	int intensity;
 	float intensity_normalized;
 	unsigned int processed;
 
-
 	unsigned int star;
-
 	unsigned int yellowMark;
-
 	unsigned int color;
-
-
 	unsigned int sorted;
 
 }Pixel_t;
-
 
 typedef struct
 {
@@ -74,15 +63,9 @@ typedef struct
 	int pixelCount;
 }star_t;
 
-
-//star_t* found_stars[500];
-
 star_t** found_stars;
 
 int stars_count = 0;
-
-
-char reportString[4096];
 
 
 void set_img_pixel(bmp_img* img, int row, int col, unsigned int rgb)
@@ -345,7 +328,9 @@ int main(int argc, char** argv)
 
 	float intensity_threshold;
 
-	if(argc < 2)
+	int star_size_min = 0;
+
+	if(argc != 4)
 	{
 		printf(helpString);
 		fflush(stdout);
@@ -359,20 +344,30 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	int relative_intensity = 1;
-	if(argc >= 3)
-	{
-		if(!strstr(argv[2], "x") )
-		{
-			relative_intensity = 0;
-		}
 
-		sscanf(argv[2], "%f", &intensity_threshold);
-	}
-	else
+
+	//Intensity
+	int relative_intensity = 1;
+
+	if(!strstr(argv[2], "x") )
 	{
-		intensity_threshold = 2.0F; //By default, pixels at least 2x brighter than average value are qualified as star pixels
+		relative_intensity = 0;
 	}
+
+	sscanf(argv[2], "%f", &intensity_threshold);
+	/////////////////////////////
+
+
+	//Star size
+	sscanf(argv[3], "%d", &star_size_min);
+
+	if (star_size_min < 1)
+	{
+		printf("Invalid minimum star size.\r\n");
+		fflush(stdout);
+		return 1;
+	}
+	/////////////////////////////
 
 
 	getFileNameWithoutExtension(argv[1], filebase);
@@ -489,15 +484,7 @@ int main(int argc, char** argv)
 				//set_img_pixel(&img, nextpix->row, nextpix->col, nextpix->color);
 
 
-				unsigned int r,g,b;
 
-				r = (unsigned int)( (float)((nextpix->color >> 16) & 0xFF) * nextpix->intensity_normalized);
-				g = (unsigned int)( (float)((nextpix->color >> 8) & 0xFF) *  nextpix->intensity_normalized);
-				b = (unsigned int)( (float)((nextpix->color >> 0) & 0xFF) *  nextpix->intensity_normalized);
-
-				set_img_pixel(&img, nextpix->row, nextpix->col,  ((unsigned int)r << 16) |
-																((unsigned int)g << 8)  |
-																((unsigned int)b << 0));
 
 				nextpix->processed = 0x01;
 				newStar->pixels[newStar->pixelCount++] = nextpix;
@@ -594,14 +581,20 @@ int main(int argc, char** argv)
 
 
 
+				if(newStar->pixelCount >= star_size_min)
+				{
+					found_stars[stars_count++] = newStar;
+				}
+				else
+				{
+					free(newStar->pixels);
+					free(newStar);
+				}
 
-
-				found_stars[stars_count++] = newStar;
 
 				if(stars_count >= starBufferSize)
 				{
 					starBufferSize += 100;
-
 					found_stars = (star_t**)realloc((void*)found_stars, starBufferSize * sizeof(star_t**));
 				}
 			}
@@ -614,7 +607,6 @@ int main(int argc, char** argv)
 	fReport = fopen(report_name, "w");
 
 	fprintf(fReport, "StarBound v0.2\nInput file: %s\nCoordinate system: Row-Column\nOrigin: Top-Left\nIntensity: 0.000...1.000\nAverage intensity: %1.3f\nIntensity threshold: %1.3f\n\nStars: %d\n", argv[1], average_intensity, intensity_threshold, stars_count);
-
 
 
 
@@ -631,6 +623,18 @@ int main(int argc, char** argv)
 					found_stars[star]->pixels[pixel]->row,
 					found_stars[star]->pixels[pixel]->col,
 					found_stars[star]->pixels[pixel]->intensity_normalized);
+
+
+
+			unsigned int r,g,b;
+
+			r = (unsigned int)( (float)((found_stars[star]->pixels[pixel]->color >> 16) & 0xFF) * found_stars[star]->pixels[pixel]->intensity_normalized);
+			g = (unsigned int)( (float)((found_stars[star]->pixels[pixel]->color >> 8) & 0xFF) *  found_stars[star]->pixels[pixel]->intensity_normalized);
+			b = (unsigned int)( (float)((found_stars[star]->pixels[pixel]->color >> 0) & 0xFF) *  found_stars[star]->pixels[pixel]->intensity_normalized);
+
+			set_img_pixel(&img, found_stars[star]->pixels[pixel]->row, found_stars[star]->pixels[pixel]->col,  (r << 16) | (g << 8) | b);
+
+
 		}
 		fprintf(fReport, "\n");
 
@@ -639,6 +643,9 @@ int main(int argc, char** argv)
 		int starSizeV = found_stars[star]->boundRowMax - found_stars[star]->boundRowMin;
 
 		int lineSize = (starSizeH > starSizeV)?starSizeV:starSizeH;
+
+
+
 
 
 		//vertical line of cross
@@ -654,18 +661,6 @@ int main(int argc, char** argv)
 					found_stars[star]->centerRow,
 					found_stars[star]->centerCol + (lineSize / 2 + 2) + 1,
 					COLOR_STAR_CENTER);
-
-	/*	draw_rect(&img, found_stars[star]->boundRowMin - 1,
-					found_stars[star]->boundColMin - 1,
-					found_stars[star]->sizeCol + 2,
-					found_stars[star]->sizeRow + 2,
-					COLOR_STAR_CENTER);*/
-
-		/*draw_number(&img, (star+1),
-				    found_stars[star]->boundRowMin - 10,
-					(found_stars[star]->boundColMin - 1),
-					COLOR_STAR_CENTER);*/
-
 
 		draw_number(&img, (star+1),
 					    found_stars[star]->centerRow - 9,
