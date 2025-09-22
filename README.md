@@ -2,14 +2,15 @@
 Utility for counting stars in the sky.  
 
 Usage:  
-starbound.exe *file_name* [intensity_threshold]  
+starbound.exe *file_name* *intensity_threshold* *star_size_min* 
 
 *file_name* - path to .bmp picture of the sky  
-[intensity_threshold] - optional. Minimum brightness of pixel that counts as star pixel. Can take absolute value in range [0.000...1.000] or value relative to the average intensity of the picture. In this case, "x" should be added, e.g. 8.0x. By default, this option have a value of 2.0x.
- 
+*intensity_threshold* - minimum brightness of pixel that counts as star pixel. Can take absolute value in range [0.000...1.000] or value relative to the average intensity of the picture. In this case, "x" should be added, e.g. 8.0x.
+*star_size_min* - minimum star size in pixels
+
 Example usage:  
-starbound.exe sky.bmp 3.5x - relative intensity  
-starbound.exe sky.bmp 0.15 - absolute intensity  
+starbound.exe sky.bmp 3.5x 5 - relative intensity 3.5x, min size 5px  
+starbound.exe sky.bmp 0.15 12 - absolute intensity 0.15, min size 12px  
 
 Output:  
 	1) Text report with filename *file_name*_report.txt  
