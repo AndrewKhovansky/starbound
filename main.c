@@ -16,8 +16,10 @@
 
 #define COLOR_SKY 0x000000
 #define COLOR_STAR 0xFF0000
-#define COLOR_STAR_OUTLINE 0x0000FF
+#define COLOR_STAR_FILL 0x0000FF
 #define COLOR_STAR_CENTER 0xFFFFFF
+
+#define BMP_OUTPUT_SIDE_MARGIN_PIXELS 15
 
 const char* helpString =
 "\nSyntax: starbound *file_name* *intensity_threshold* *star_size_min*\n\n"\
@@ -38,11 +40,7 @@ typedef struct
 	float intensity_normalized;
 	unsigned int processed;
 
-	unsigned int star;
-	unsigned int yellowMark;
 	unsigned int color;
-	unsigned int sorted;
-
 }Pixel_t;
 
 typedef struct
@@ -58,41 +56,463 @@ typedef struct
 	int sizeCol;
 	int sizeRow;
 
-
 	Pixel_t** pixels;
 	int pixelCount;
-}star_t;
+}Star_t;
 
-star_t** found_stars;
+Star_t** found_stars;
+
+bmp_img img;
+Pixel_t* pixels;
 
 int stars_count = 0;
 
-
-void set_img_pixel(bmp_img* img, int row, int col, unsigned int rgb)
+void inline __attribute__((always_inline)) img_draw_pixel(bmp_img* img, int row, int col, unsigned int rgb)
 {
-	if(row < 0)
+	/*if(row < 0)
 		return;
 
 	if(row >= img->img_header.biHeight)
 		return;
 
-
 	if(col < 0)
 		return;
 
 	if(col >= img->img_header.biWidth)
-		return;
+		return;*/
 
 
+	bmp_pixel* px = (img->img_pixels[row] + col);
 
-	(img->img_pixels[row] + col)->red = (unsigned char)(rgb >> 16);
-	(img->img_pixels[row] + col)->green = (unsigned char)(rgb >> 8);
-	(img->img_pixels[row] + col)->blue = (unsigned char)(rgb >> 0);
+	px->red =   (unsigned char)(rgb >> 16);
+	px->green = (unsigned char)(rgb >> 8);
+	px->blue =  (unsigned char)(rgb >> 0);
 }
 
 
 
-void draw_digit(bmp_img* img, int digit, int row, int col, unsigned int rgb)
+void img_draw_digit(bmp_img* img, int digit, int row, int col, unsigned int rgb);
+void img_draw_number(bmp_img* img, int number, int row, int col, unsigned int rgb);
+void img_draw_line(bmp_img* img, int row1, int col1, int row2, int col2, unsigned int rgb);
+
+Pixel_t* strideToNextPixel(Pixel_t* curPixel);
+int getFileNameWithoutExtension(char* in, char* out);
+
+int main(int argc, char** argv)
+{
+	char filebase[100];
+	char report_name[256];
+	char out_image_name[256];
+
+	float intensity_threshold;
+
+	int star_size_min = 0;
+
+	if(argc != 4)
+	{
+		printf(helpString);
+		fflush(stdout);
+		return 1;
+	}
+
+	if(bmp_img_read(&img, argv[1]) != BMP_OK)
+	{
+		printf("Cannot open BMP file.\r\n");
+		fflush(stdout);
+		return 1;
+	}
+
+	//Intensity
+	int relative_intensity = 1;
+
+	if(!strstr(argv[2], "x") )
+	{
+		relative_intensity = 0;
+	}
+
+	sscanf(argv[2], "%f", &intensity_threshold);
+	/////////////////////////////
+
+
+	//Star size
+	sscanf(argv[3], "%d", &star_size_min);
+
+	if (star_size_min < 1)
+	{
+		printf("Invalid minimum star size.\r\n");
+		fflush(stdout);
+		return 1;
+	}
+	/////////////////////////////
+
+
+	getFileNameWithoutExtension(argv[1], filebase);
+
+	sprintf(report_name, "%s_report.txt", filebase);
+	sprintf(out_image_name, "%s_report.bmp", filebase);
+
+	int pixelCount = img.img_header.biHeight * img.img_header.biWidth;
+
+	pixels = (Pixel_t*)malloc( sizeof(Pixel_t) * pixelCount );
+
+	int starBufferSize = 100;
+	found_stars = (Star_t**)malloc(sizeof(Star_t**) * starBufferSize);
+
+	if(!found_stars || !pixels)
+	{
+		printf("Cannot allocate memory.\r\n");
+		fflush(stdout);
+		return 1;
+	}
+
+
+
+
+
+
+
+	int row = 0;
+	int col = 0;
+
+	float average_intensity;
+
+	average_intensity = 0;
+	for(int i=0; i < pixelCount; ++i)
+	{
+		bmp_pixel* px;
+
+		px = (img.img_pixels[row] + col);
+
+		pixels[i].intensity = (px->red + px->green + px->blue);
+		pixels[i].intensity_normalized = ((float)pixels[i].intensity / 765.0F);
+
+		average_intensity += pixels[i].intensity_normalized;
+
+		pixels[i].row = row;
+		pixels[i].col = col;
+
+		col++;
+		if(col >= img.img_header.biWidth)
+		{
+			row++;
+			col = 0;
+		}
+	}
+
+	average_intensity /= pixelCount;
+
+	if(relative_intensity)
+	{
+		intensity_threshold =  average_intensity * intensity_threshold;
+	}
+
+	for(int i=0; i < pixelCount; ++i)
+	{
+		if(pixels[i].intensity_normalized >= intensity_threshold)
+		{
+			pixels[i].color = COLOR_STAR; //Mark pixel as star pixel
+		}
+		else
+		{
+			pixels[i].color = COLOR_SKY; //Mark pixel as sky pixel
+		}
+	}
+
+
+	stars_count = 0;
+	for(int i = 0; i < (pixelCount); ++i)
+	{
+		if(pixels[i].processed)
+		{
+			continue;
+		}
+
+		if(pixels[i].color == COLOR_STAR)
+		{
+			Pixel_t* nextpix = &pixels[i];
+
+			Star_t* newStar = (Star_t*)calloc(sizeof(Star_t), 1);
+
+			int starPixelBufferSize = 100;
+			newStar->pixels = (Pixel_t**)calloc(sizeof(Pixel_t**), starPixelBufferSize);
+
+			Pixel_t** pixelStrideList;
+			int pixelStrideCount = 0;
+
+			int pixelStrideListSize = 100;
+
+			pixelStrideList = (Pixel_t**)malloc(sizeof(Pixel_t**) * pixelStrideListSize);
+			pixelStrideCount = 0;
+
+			int starBoundRowMin = nextpix->row;
+			int starBoundRowMax = nextpix->row;
+			int starBoundColMin = nextpix->col;
+			int starBoundColMax = nextpix->col;
+
+			while(1)
+			{
+				pixelStrideList[pixelStrideCount++] = nextpix;
+
+				if(pixelStrideCount >= pixelStrideListSize)
+				{
+					pixelStrideListSize += 100;
+					pixelStrideList = (Pixel_t**)realloc(pixelStrideList, sizeof(Pixel_t**) * pixelStrideListSize);
+
+					if(!pixelStrideList)
+					{
+						printf("Cannot allocate memory.\r\n");
+						fflush(stdout);
+						return 1;
+					}
+				}
+
+				nextpix->color = COLOR_STAR_FILL;
+
+				nextpix->processed = 0x01;
+				newStar->pixels[newStar->pixelCount++] = nextpix;
+
+				if(newStar->pixelCount >= starPixelBufferSize)
+				{
+					starPixelBufferSize += 100;
+					newStar->pixels = (Pixel_t**)realloc(newStar->pixels, sizeof(Pixel_t**) * starPixelBufferSize);
+
+					if(!newStar->pixels)
+					{
+						printf("Cannot allocate memory.\r\n");
+						fflush(stdout);
+						return 1;
+					}
+				}
+
+				if (nextpix->row < starBoundRowMin)
+					starBoundRowMin = nextpix->row;
+
+				if (nextpix->row > starBoundRowMax)
+					starBoundRowMax = nextpix->row;
+
+				if (nextpix->col < starBoundColMin)
+					starBoundColMin = nextpix->col;
+
+				if (nextpix->col > starBoundColMax)
+					starBoundColMax = nextpix->col;
+
+				nextpix = strideToNextPixel(nextpix);
+
+				while(!nextpix)  //dead end. Stride back.
+				{
+					pixelStrideCount--;
+
+					if(pixelStrideCount < 1)
+						break;
+
+					nextpix = strideToNextPixel(pixelStrideList[pixelStrideCount - 1]);
+				}
+
+				if(!nextpix) //stride list is empty
+				{
+					free(pixelStrideList);
+					pixelStrideList = NULL;
+					break;
+				}
+			}
+
+			if(newStar->pixelCount > 0)
+			{
+				if(newStar->pixelCount >= star_size_min) //Star size is bigger or equal to the min value
+				{
+					//Estimate star mass center coordinates
+					int centerRow = 0;
+					int centerCol = 0;
+					for(int i = 0; i < newStar->pixelCount; ++i)
+					{
+						centerRow += newStar->pixels[i]->row;
+						centerCol += newStar->pixels[i]->col;
+					}
+
+					newStar->centerCol = (int)roundf((float)centerCol / (float)newStar->pixelCount);
+					newStar->centerRow = (int)roundf((float)centerRow / (float)newStar->pixelCount);
+
+					//Estimate star size
+					newStar->boundRowMin = starBoundRowMin;
+					newStar->boundRowMax = starBoundRowMax;
+					newStar->boundColMin = starBoundColMin;
+					newStar->boundColMax = starBoundColMax;
+
+					newStar->sizeCol = starBoundColMax - starBoundColMin + 1;
+					newStar->sizeRow = starBoundRowMax - starBoundRowMin + 1;
+
+					//Add star to list
+					found_stars[stars_count++] = newStar;
+				}
+				else
+				{
+					free(newStar->pixels);
+					free(newStar);
+				}
+
+
+				if(stars_count >= starBufferSize) //Increase list size
+				{
+					starBufferSize += 100;
+					found_stars = (Star_t**)realloc((void*)found_stars, starBufferSize * sizeof(Star_t**));
+				}
+			}
+		}
+	}
+
+
+	FILE* fReport;
+
+	fReport = fopen(report_name, "w");
+
+	fprintf(fReport, "StarBound v0.2\nInput file: %s\nCoordinate system: Row-Column\nOrigin: Top-Left\nIntensity: 0.000...1.000\nAverage intensity: %1.3f\nIntensity threshold: %1.3f\n\nStars: %d\n", argv[1], average_intensity, intensity_threshold, stars_count);
+
+	//Add borders
+	int dcl = stars_count;
+
+	int margin_right = 0;
+
+	while(dcl > 0)
+	{
+		margin_right += 8;
+		dcl /= 10;
+	}
+
+	//create output bmp
+	bmp_img bmp_output;
+	bmp_img_init_df(&bmp_output, img.img_header.biWidth + BMP_OUTPUT_SIDE_MARGIN_PIXELS * 2 + margin_right,
+								 img.img_header.biHeight + BMP_OUTPUT_SIDE_MARGIN_PIXELS * 2);
+
+
+
+	//Fill borders
+	for(int side = 0; side < 4; ++side)
+	{
+		int row1, col1, row2, col2;
+
+		if(side == 0)
+		{
+			row1 = 0;
+			row2 = img.img_header.biHeight + BMP_OUTPUT_SIDE_MARGIN_PIXELS*2 - 1;
+			col1 = 0;
+			col2 = BMP_OUTPUT_SIDE_MARGIN_PIXELS - 1;
+		}
+		else if(side == 1)
+		{
+			row1 = 0;
+			row2 = BMP_OUTPUT_SIDE_MARGIN_PIXELS - 1;
+			col1 = 0;
+			col2 = img.img_header.biWidth + BMP_OUTPUT_SIDE_MARGIN_PIXELS * 2 + margin_right - 1;
+		}
+		else if(side == 2)
+		{
+			row1 = 0;
+			row2 = img.img_header.biHeight + BMP_OUTPUT_SIDE_MARGIN_PIXELS*2 - 1;
+			col1 = img.img_header.biWidth + BMP_OUTPUT_SIDE_MARGIN_PIXELS;
+			col2 = img.img_header.biWidth + BMP_OUTPUT_SIDE_MARGIN_PIXELS * 2 + margin_right - 1;
+		}
+		else if(side == 3)
+		{
+			row1 = img.img_header.biHeight + BMP_OUTPUT_SIDE_MARGIN_PIXELS;
+			row2 = img.img_header.biHeight + BMP_OUTPUT_SIDE_MARGIN_PIXELS * 2 - 1;
+			col1 = 0;
+			col2 = img.img_header.biWidth + BMP_OUTPUT_SIDE_MARGIN_PIXELS * 2 + margin_right - 1;
+		}
+
+		for(int row = row1; row <= row2; ++row)
+		{
+			bmp_pixel* px = bmp_output.img_pixels[row] + col1;
+
+			for(int col = col1; col <= col2; ++col)
+			{
+				px->red  = 0;
+				px->green = 0;
+				px->blue = 0;
+
+				px++;
+			}
+		}
+	}
+
+
+	for(int row=0; row<img.img_header.biHeight; ++row)
+	{
+		bmp_pixel* px = bmp_output.img_pixels[row + BMP_OUTPUT_SIDE_MARGIN_PIXELS] + BMP_OUTPUT_SIDE_MARGIN_PIXELS;
+
+		for(int col=0; col<img.img_header.biWidth; ++col)
+		{
+			*(px++) = *(img.img_pixels[row] + col);
+		}
+	}
+
+	for(int star=0; star<stars_count; ++star)
+	{
+		for(int pixel=0; pixel<found_stars[star]->pixelCount; ++pixel)
+		{
+			unsigned int r,g,b;
+
+			r = (unsigned int)( (float)((found_stars[star]->pixels[pixel]->color >> 16) & 0xFF) * found_stars[star]->pixels[pixel]->intensity_normalized);
+			g = (unsigned int)( (float)((found_stars[star]->pixels[pixel]->color >> 8) & 0xFF) *  found_stars[star]->pixels[pixel]->intensity_normalized);
+			b = (unsigned int)( (float)((found_stars[star]->pixels[pixel]->color >> 0) & 0xFF) *  found_stars[star]->pixels[pixel]->intensity_normalized);
+
+			img_draw_pixel(&bmp_output, BMP_OUTPUT_SIDE_MARGIN_PIXELS + found_stars[star]->pixels[pixel]->row,
+									   BMP_OUTPUT_SIDE_MARGIN_PIXELS + found_stars[star]->pixels[pixel]->col,
+									   (r << 16) | (g << 8) | b);
+		}
+	}
+
+
+	for(int star=0; star<stars_count; ++star)
+	{
+		fprintf(fReport, " Star #%d:\n", (star+1));
+		fprintf(fReport, "  Mass center: [%d,%d]\n", found_stars[star]->centerRow, found_stars[star]->centerCol);
+		fprintf(fReport, "  Pixels: %d\n", found_stars[star]->pixelCount);
+		for(int pixel=0; pixel<found_stars[star]->pixelCount; ++pixel)
+		{
+			fprintf(fReport, "   Pixel %d:\t[%d,%d]\tIntensity: %1.3f\n", (pixel+1),
+					found_stars[star]->pixels[pixel]->row,
+					found_stars[star]->pixels[pixel]->col,
+					found_stars[star]->pixels[pixel]->intensity_normalized);
+		}
+
+		fprintf(fReport, "\n");
+
+		//Select minimal star size (row or col) for cross line
+		int crossLineLen = (found_stars[star]->sizeCol > found_stars[star]->sizeRow)?found_stars[star]->sizeRow:found_stars[star]->sizeCol;
+
+		//vertical line of cross
+		img_draw_line(&bmp_output, BMP_OUTPUT_SIDE_MARGIN_PIXELS + found_stars[star]->centerRow - (crossLineLen / 2 + 2),
+				BMP_OUTPUT_SIDE_MARGIN_PIXELS + found_stars[star]->centerCol,
+				BMP_OUTPUT_SIDE_MARGIN_PIXELS + found_stars[star]->centerRow + (crossLineLen / 2 + 2)  + 1,
+				BMP_OUTPUT_SIDE_MARGIN_PIXELS + found_stars[star]->centerCol,
+					COLOR_STAR_CENTER);
+
+		//horizontal line of cross
+		img_draw_line(&bmp_output, BMP_OUTPUT_SIDE_MARGIN_PIXELS + found_stars[star]->centerRow,
+				BMP_OUTPUT_SIDE_MARGIN_PIXELS + found_stars[star]->centerCol - (crossLineLen / 2 + 2),
+				BMP_OUTPUT_SIDE_MARGIN_PIXELS + found_stars[star]->centerRow,
+				BMP_OUTPUT_SIDE_MARGIN_PIXELS + found_stars[star]->centerCol + (crossLineLen / 2 + 2) + 1,
+					COLOR_STAR_CENTER);
+
+		img_draw_number(&bmp_output, (star+1),
+				BMP_OUTPUT_SIDE_MARGIN_PIXELS + found_stars[star]->centerRow - 9,
+				BMP_OUTPUT_SIDE_MARGIN_PIXELS + (found_stars[star]->centerCol + 2),
+						COLOR_STAR_CENTER);
+	}
+
+
+	bmp_img_write(&bmp_output, out_image_name);
+
+	return 0;
+}
+
+
+
+
+
+
+
+void img_draw_digit(bmp_img* img, int digit, int row, int col, unsigned int rgb)
 {
 	int digitIdx = digit * 8;
 	for(int c=0; c<8; ++c)
@@ -101,7 +521,7 @@ void draw_digit(bmp_img* img, int digit, int row, int col, unsigned int rgb)
 		{
 			if( Standard8x8[digitIdx] & (0x01 << r)  )
 			{
-				set_img_pixel(img, row + r, col + c, rgb);
+				img_draw_pixel(img, row + r, col + c, rgb);
 			}
 		}
 		digitIdx++;
@@ -109,121 +529,61 @@ void draw_digit(bmp_img* img, int digit, int row, int col, unsigned int rgb)
 }
 
 
-void draw_number(bmp_img* img, int number, int row, int col, unsigned int rgb)
+void img_draw_number(bmp_img* img, int number, int row, int col, unsigned int rgb)
 {
 	char temp[40];
 
 	snprintf(temp, (sizeof(temp)-1), "%d", number);
 
-
 	for(int i=0; i<strlen(temp); ++i)
 	{
-		draw_digit(img,(temp[i]-48),row, col, rgb);
+		img_draw_digit(img,(temp[i]-48),row, col, rgb);
 		col += 8;
 	}
-
-
-
 }
 
 
 
-void draw_line(bmp_img* img, int row1, int col1, int row2, int col2, unsigned int rgb)
+void img_draw_line(bmp_img* img, int row1, int col1, int row2, int col2, unsigned int rgb)
 {
-	float deltaRow = (float)row2 - (float)row1;
-	float deltaCol = (float)col2 - (float)col1;
+	int deltaRow = row2 - row1;
+	int deltaCol = col2 - col1;
 
-	int len = (int)(roundf(sqrtf( deltaCol*deltaCol + deltaRow*deltaRow )));
+	int len = (int)(roundf(sqrtf((float)(deltaCol*deltaCol + deltaRow*deltaRow))));
 
 	float stepRow, stepCol;
 
+	float rowFloat, colFloat;
+	int rowInt, colInt;
 
-	stepRow = deltaRow / (float)len;
-	stepCol = deltaCol / (float)len;
-
-	float rowFloat;
-	float colFloat;
-
+	stepRow = (float)deltaRow / (float)len;
+	stepCol = (float)deltaCol / (float)len;
 
 	rowFloat = (float)row1;
 	colFloat = (float)col1;
 
-
-
 	while(len--)
 	{
-		set_img_pixel(img, (int)roundf(rowFloat), (int)roundf(colFloat), rgb);
+		rowInt = (int)roundf(rowFloat);
+		colInt = (int)roundf(colFloat);
+
+		img_draw_pixel(img, rowInt, colInt, rgb);
 
 		rowFloat += stepRow;
 		colFloat += stepCol;
 	}
-
-
 }
 
 
-
-
-
-void draw_rect(bmp_img* img, int row, int col, int w, int h, unsigned int rgb)
+//Select next pixel for outline
+Pixel_t* strideToNextPixel(Pixel_t* curPixel)
 {
-	int dcol, drow;
-	int len;
-	for(int side=0; side<4; ++side)
+	int nextRow, nextCol;
+	Pixel_t* nextPix;
+
+	//pixel stride directions
+	static const int deltas[8][2] =
 	{
-		if(side == 0)
-		{
-			dcol = 1;
-			drow = 0;
-			len = w;
-		}
-		else if(side == 1)
-		{
-			dcol = 0;
-			drow = 1;
-			len = h;
-		}
-		if(side == 2)
-		{
-			dcol = -1;
-			drow = 0;
-			len = w;
-		}
-		if(side == 3)
-		{
-			dcol = 0;
-			drow = -1;
-			len = h;
-		}
-
-
-		while(len--)
-		{
-			if((row < 0) || (col < 0))
-				break;
-
-			if((row >= img->img_header.biHeight) || (col >= img->img_header.biWidth))
-			{
-				break;
-			}
-
-
-
-			(img->img_pixels[row] + col)->red =   rgb >> 16;
-			(img->img_pixels[row] + col)->green = rgb >> 8;
-			(img->img_pixels[row] + col)->blue =  rgb >> 0;
-
-			col += dcol;
-			row += drow;
-		}
-	}
-}
-
-
-bmp_img img;
-Pixel_t* pixels;
-
-const int deltas[8][2] = {
 		{0,1},   //Right
 		{-1,1},  //Up-right
 		{-1,0},  //Up
@@ -232,28 +592,34 @@ const int deltas[8][2] = {
 		{1,-1},  //Down-left
 		{1,0},   //Down
 		{1,1},   //Down-right
-};
+	};
 
+	nextPix = NULL;
+	for(int i=0; i<8; ++i)
+	{
+		nextRow = curPixel->row + deltas[i][0];
+		nextCol = curPixel->col + deltas[i][1];
 
-Pixel_t* getpix(int row, int col)
-{
+		//Check for image borders
+		if (nextRow >= img.img_header.biHeight)
+			continue;
+		if (nextCol >= img.img_header.biWidth)
+			continue;
+		if (nextRow < 0)
+			continue;
+		if (nextCol < 0)
+			continue;
 
-	if(row < 0)
-		return NULL;
+		nextPix = pixels + nextRow * img.img_header.biWidth + nextCol;
 
-	if(row >= img.img_header.biHeight)
-		return NULL;
+		if(nextPix->color == COLOR_STAR)
+		{
+			return nextPix;
+		}
+	}
 
-	if(col < 0)
-		return NULL;
-
-	if(col >= img.img_header.biWidth)
-		return NULL;
-
-	return &pixels[row * img.img_header.biWidth + col];
+	return NULL;
 }
-
-Pixel_t* strideToNextPixel(Pixel_t* curPixel);
 
 int getFileNameWithoutExtension(char* in, char* out)
 {
@@ -315,396 +681,6 @@ int getFileNameWithoutExtension(char* in, char* out)
 	out[p] = 0;
 
 	return 0;
-}
-
-
-
-
-int main(int argc, char** argv)
-{
-	char filebase[100];
-	char report_name[256];
-	char out_image_name[256];
-
-	float intensity_threshold;
-
-	int star_size_min = 0;
-
-	if(argc != 4)
-	{
-		printf(helpString);
-		fflush(stdout);
-		return 1;
-	}
-
-	if(bmp_img_read(&img, argv[1]) != BMP_OK)
-	{
-		printf("Cannot open BMP file.\r\n");
-		fflush(stdout);
-		return 1;
-	}
-
-
-
-	//Intensity
-	int relative_intensity = 1;
-
-	if(!strstr(argv[2], "x") )
-	{
-		relative_intensity = 0;
-	}
-
-	sscanf(argv[2], "%f", &intensity_threshold);
-	/////////////////////////////
-
-
-	//Star size
-	sscanf(argv[3], "%d", &star_size_min);
-
-	if (star_size_min < 1)
-	{
-		printf("Invalid minimum star size.\r\n");
-		fflush(stdout);
-		return 1;
-	}
-	/////////////////////////////
-
-
-	getFileNameWithoutExtension(argv[1], filebase);
-
-	sprintf(report_name, "%s_report.txt", filebase);
-	sprintf(out_image_name, "%s_report.bmp", filebase);
-
-	int pixelCount = img.img_header.biHeight * img.img_header.biWidth;
-
-	pixels = (Pixel_t*)malloc( sizeof(Pixel_t) * pixelCount );
-
-	int starBufferSize = 100;
-	found_stars = (star_t**)malloc(sizeof(star_t**) * starBufferSize);
-
-	if(!found_stars || !pixels)
-	{
-		printf("Cannot allocate memory.\r\n");
-		fflush(stdout);
-		return 1;
-	}
-
-	int row = 0;
-	int col = 0;
-
-	float average_intensity;
-
-	average_intensity = 0;
-	for(int i=0; i < pixelCount; ++i)
-	{
-		bmp_pixel* px;
-
-		px = (img.img_pixels[row] + col);
-
-		pixels[i].intensity = (px->red + px->green + px->blue);
-		pixels[i].intensity_normalized = ((float)pixels[i].intensity / 765.0F);
-
-		average_intensity += pixels[i].intensity_normalized;
-
-		pixels[i].row = row;
-		pixels[i].col = col;
-
-		col++;
-		if(col >= img.img_header.biWidth)
-		{
-			row++;
-			col = 0;
-		}
-	}
-
-	average_intensity /= pixelCount;
-
-
-	if(relative_intensity)
-	{
-		intensity_threshold =  average_intensity * intensity_threshold;
-	}
-
-
-
-	for(int i=0; i < pixelCount; ++i)
-	{
-		if(pixels[i].intensity_normalized >= intensity_threshold)
-		{
-			pixels[i].color = COLOR_STAR; //Mark pixel as star pixel
-		}
-		else
-		{
-			pixels[i].color = COLOR_SKY; //Mark pixel as sky pixel
-		}
-	}
-
-
-	stars_count = 0;
-	for(int i = 0; i < (pixelCount); ++i)
-	{
-		if(pixels[i].processed)
-		{
-			continue;
-		}
-
-		if(pixels[i].color == COLOR_STAR)
-		{
-			Pixel_t* nextpix = &pixels[i];
-
-			star_t* newStar = (star_t*)calloc(sizeof(star_t), 1);
-
-			int starPixelBufferSize = 100;
-			newStar->pixels = (Pixel_t**)calloc(sizeof(Pixel_t**), starPixelBufferSize);
-
-			int starBoundRowMin = -1;
-			int starBoundRowMax = -1;
-			int starBoundColMin = -1;
-			int starBoundColMax = -1;
-
-			Pixel_t** pixelStrideList;
-			int pixelStrideCount = 0;
-
-			int pixelStrideListSize = 100;
-
-			pixelStrideList = (Pixel_t**)malloc(sizeof(Pixel_t**) * pixelStrideListSize);
-			pixelStrideCount = 0;
-
-			while(1)
-			{
-				pixelStrideList[pixelStrideCount++] = nextpix;
-
-				if(pixelStrideCount >= pixelStrideListSize)
-				{
-					pixelStrideListSize += 100;
-					pixelStrideList = (Pixel_t**)realloc(pixelStrideList, sizeof(Pixel_t**) * pixelStrideListSize);
-				}
-
-				nextpix->color = COLOR_STAR_OUTLINE;
-				//set_img_pixel(&img, nextpix->row, nextpix->col, nextpix->color);
-
-
-
-
-				nextpix->processed = 0x01;
-				newStar->pixels[newStar->pixelCount++] = nextpix;
-
-				if(newStar->pixelCount >= starPixelBufferSize)
-				{
-					starPixelBufferSize += 100;
-					newStar->pixels = (Pixel_t**)realloc(newStar->pixels, sizeof(Pixel_t**) * starPixelBufferSize);
-
-					if(!newStar->pixels)
-					{
-						printf("Cannot allocate memory.\r\n");
-						fflush(stdout);
-						return 1;
-					}
-				}
-
-				if(starBoundRowMin == -1)
-					starBoundRowMin = nextpix->row;
-				else if (nextpix->row < starBoundRowMin)
-					starBoundRowMin = nextpix->row;
-
-				if(starBoundRowMax == -1)
-					starBoundRowMax = nextpix->row;
-				else if (nextpix->row > starBoundRowMax)
-					starBoundRowMax = nextpix->row;
-
-				if(starBoundColMin == -1)
-					starBoundColMin = nextpix->col;
-				else if (nextpix->col < starBoundColMin)
-					starBoundColMin = nextpix->col;
-
-				if(starBoundColMax == -1)
-					starBoundColMax = nextpix->col;
-				else if (nextpix->col > starBoundColMax)
-					starBoundColMax = nextpix->col;
-
-
-				nextpix = strideToNextPixel(nextpix);
-
-				while(!nextpix)
-				{
-					pixelStrideCount--;
-
-					if(pixelStrideCount < 1)
-						break;
-
-					nextpix = strideToNextPixel(pixelStrideList[pixelStrideCount - 1]);
-				}
-
-				if((!nextpix))
-				{
-					free(pixelStrideList);
-					pixelStrideList = NULL;
-					break;
-				}
-			}
-
-			if(newStar->pixelCount > 0)
-			{
-				int centerRow = 0;
-				int centerCol = 0;
-
-				float sum_intensity = 0;
-
-				float weight;
-
-				for(int i = 0; i < newStar->pixelCount; ++i)
-				{
-					//weight = newStar->pixels[i]->intensity_normalized;
-
-					//weight = weight * weight;
-
-					weight = 1.0f;
-
-					centerRow += newStar->pixels[i]->row * weight;
-					centerCol += newStar->pixels[i]->col * weight;
-
-					sum_intensity += weight;
-
-				//	sum_intensity += 1.0f;
-				}
-
-				newStar->centerCol = centerCol / sum_intensity;
-				newStar->centerRow = centerRow / sum_intensity;
-
-				newStar->boundRowMin = starBoundRowMin;
-				newStar->boundRowMax = starBoundRowMax;
-				newStar->boundColMin = starBoundColMin;
-				newStar->boundColMax = starBoundColMax;
-
-				newStar->sizeCol = starBoundColMax - starBoundColMin;
-				newStar->sizeRow = starBoundRowMax - starBoundRowMin;
-
-
-
-				if(newStar->pixelCount >= star_size_min)
-				{
-					found_stars[stars_count++] = newStar;
-				}
-				else
-				{
-					free(newStar->pixels);
-					free(newStar);
-				}
-
-
-				if(stars_count >= starBufferSize)
-				{
-					starBufferSize += 100;
-					found_stars = (star_t**)realloc((void*)found_stars, starBufferSize * sizeof(star_t**));
-				}
-			}
-		}
-	}
-
-
-	FILE* fReport;
-
-	fReport = fopen(report_name, "w");
-
-	fprintf(fReport, "StarBound v0.2\nInput file: %s\nCoordinate system: Row-Column\nOrigin: Top-Left\nIntensity: 0.000...1.000\nAverage intensity: %1.3f\nIntensity threshold: %1.3f\n\nStars: %d\n", argv[1], average_intensity, intensity_threshold, stars_count);
-
-
-
-	for(int star=0; star<stars_count; ++star)
-	{
-		//int lineSize = 10;
-
-		fprintf(fReport, " Star #%d:\n", (star+1));
-		fprintf(fReport, "  Mass center: [%d,%d]\n", found_stars[star]->centerRow, found_stars[star]->centerCol);
-		fprintf(fReport, "  Pixels: %d\n", found_stars[star]->pixelCount);
-		for(int pixel=0; pixel<found_stars[star]->pixelCount; ++pixel)
-		{
-			fprintf(fReport, "   Pixel %d:\t[%d,%d]\tIntensity: %1.3f\n", (pixel+1),
-					found_stars[star]->pixels[pixel]->row,
-					found_stars[star]->pixels[pixel]->col,
-					found_stars[star]->pixels[pixel]->intensity_normalized);
-
-
-
-			unsigned int r,g,b;
-
-			r = (unsigned int)( (float)((found_stars[star]->pixels[pixel]->color >> 16) & 0xFF) * found_stars[star]->pixels[pixel]->intensity_normalized);
-			g = (unsigned int)( (float)((found_stars[star]->pixels[pixel]->color >> 8) & 0xFF) *  found_stars[star]->pixels[pixel]->intensity_normalized);
-			b = (unsigned int)( (float)((found_stars[star]->pixels[pixel]->color >> 0) & 0xFF) *  found_stars[star]->pixels[pixel]->intensity_normalized);
-
-			set_img_pixel(&img, found_stars[star]->pixels[pixel]->row, found_stars[star]->pixels[pixel]->col,  (r << 16) | (g << 8) | b);
-
-
-		}
-		fprintf(fReport, "\n");
-
-
-		int starSizeH = found_stars[star]->boundColMax - found_stars[star]->boundColMin;
-		int starSizeV = found_stars[star]->boundRowMax - found_stars[star]->boundRowMin;
-
-		int lineSize = (starSizeH > starSizeV)?starSizeV:starSizeH;
-
-
-
-
-
-		//vertical line of cross
-		draw_line(&img, found_stars[star]->centerRow - (lineSize / 2 + 2),
-					found_stars[star]->centerCol,
-					found_stars[star]->centerRow + (lineSize / 2 + 2) + 1,
-					found_stars[star]->centerCol,
-					COLOR_STAR_CENTER);
-
-		//horizontal line of cross
-		draw_line(&img, found_stars[star]->centerRow,
-					found_stars[star]->centerCol - (lineSize / 2 + 2),
-					found_stars[star]->centerRow,
-					found_stars[star]->centerCol + (lineSize / 2 + 2) + 1,
-					COLOR_STAR_CENTER);
-
-		draw_number(&img, (star+1),
-					    found_stars[star]->centerRow - 9,
-						(found_stars[star]->centerCol + 2),
-						COLOR_STAR_CENTER);
-
-	}
-
-	bmp_img_write(&img, out_image_name);
-	return 0;
-}
-
-
-//Select next pixel for outline
-Pixel_t* strideToNextPixel(Pixel_t* curPixel)
-{
-	int nextRow, nextCol;
-	Pixel_t* nextPix;
-
-	nextPix = NULL;
-	for(int i=0; i<8; ++i)
-	{
-		nextRow = curPixel->row + deltas[i][0];
-		nextCol = curPixel->col + deltas[i][1];
-
-		//Check for image borders
-		if (nextRow >= img.img_header.biHeight)
-			continue;
-		if (nextCol >= img.img_header.biWidth)
-			continue;
-		if (nextRow < 0)
-			continue;
-		if (nextCol < 0)
-			continue;
-
-		nextPix = getpix(nextRow, nextCol);
-
-		if(nextPix->color == COLOR_STAR)
-		{
-			return nextPix;
-		}
-	}
-
-	return NULL;
 }
 
 
