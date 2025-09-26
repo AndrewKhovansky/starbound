@@ -533,7 +533,7 @@ int main(int argc, char** argv)
 
 		for(int pixel=0; pixel<found_stars[star]->pixelCount; ++pixel)
 		{
-			sprintf(tmp, "Pixel%d", pixel + 1);
+			sprintf(tmp, "%d", pixel + 1);
 			cJSON* tmpArrPx = cJSON_AddArrayToObject(tmpObj, tmp);
 
 			sprintf(tmp, "%d", found_stars[star]->pixels[pixel]->row);
@@ -546,7 +546,7 @@ int main(int argc, char** argv)
 			cJSON_AddItemToArray(tmpArrPx, cJSON_CreateString(tmp));
 		}
 
-		sprintf(tmp, "Star%d", (star+1));
+		sprintf(tmp, "%d", (star+1));
 		cJSON_AddItemToObject(starArray, tmp, json_star);
 
 
