@@ -14,10 +14,12 @@
 
 #include "font.h"
 
+#include "cJSON.h"
+
 #define COLOR_SKY 0x000000
 #define COLOR_STAR 0xFF0000
 #define COLOR_STAR_FILL 0x0000FF
-#define COLOR_STAR_CENTER 0xFFFFFF
+#define COLOR_STAR_CENTER 0xffffff
 
 #define BMP_OUTPUT_SIDE_MARGIN_PIXELS 15
 
@@ -102,11 +104,20 @@ int main(int argc, char** argv)
 {
 	char filebase[100];
 	char report_name[256];
+	char json_report_name[256];
 	char out_image_name[256];
 
 	float intensity_threshold;
 
 	int star_size_min = 0;
+
+
+	cJSON* json_report;
+
+	json_report = cJSON_CreateObject();
+
+
+
 
 	if(argc != 4)
 	{
@@ -149,6 +160,7 @@ int main(int argc, char** argv)
 	getFileNameWithoutExtension(argv[1], filebase);
 
 	sprintf(report_name, "%s_report.txt", filebase);
+	sprintf(json_report_name, "%s_report.json", filebase);
 	sprintf(out_image_name, "%s_report.bmp", filebase);
 
 	int pixelCount = img.img_header.biHeight * img.img_header.biWidth;
@@ -362,10 +374,29 @@ int main(int argc, char** argv)
 
 
 	FILE* fReport;
+	FILE* fJsonReport;
 
 	fReport = fopen(report_name, "w");
+	fJsonReport = fopen(json_report_name, "w");
 
 	fprintf(fReport, "StarBound v0.2\nInput file: %s\nCoordinate system: Row-Column\nOrigin: Top-Left\nIntensity: 0.000...1.000\nAverage intensity: %1.3f\nIntensity threshold: %1.3f\n\nStars: %d\n", argv[1], average_intensity, intensity_threshold, stars_count);
+
+	char tmp[200];
+
+	cJSON_AddStringToObject(json_report, "Version", "0.2");
+	cJSON_AddStringToObject(json_report, "InputFile", argv[1]);
+	cJSON_AddStringToObject(json_report, "CoordinateSystem", "Row-Column");
+	cJSON_AddStringToObject(json_report, "Origin", "Top-Left");
+
+	cJSON* intRange = cJSON_AddArrayToObject(json_report,"IntensityRange");
+	cJSON_AddItemToArray(intRange,cJSON_CreateString("0.000"));
+	cJSON_AddItemToArray(intRange,cJSON_CreateString("1.000"));
+
+	sprintf(tmp,"%1.3f",average_intensity);
+	cJSON_AddStringToObject(json_report, "IntensityAverage", tmp);
+
+	sprintf(tmp,"%1.3f",intensity_threshold);
+	cJSON_AddStringToObject(json_report, "IntensityThreshold", tmp);
 
 	//Add borders
 	int dcl = stars_count;
@@ -462,6 +493,11 @@ int main(int argc, char** argv)
 	}
 
 
+	sprintf(tmp, "%d", stars_count);
+	cJSON_AddStringToObject(json_report, "Stars", tmp);
+
+	cJSON* starArray = cJSON_AddObjectToObject(json_report,"StarArray");
+
 	for(int star=0; star<stars_count; ++star)
 	{
 		fprintf(fReport, " Star #%d:\n", (star+1));
@@ -476,6 +512,43 @@ int main(int argc, char** argv)
 		}
 
 		fprintf(fReport, "\n");
+
+		cJSON* json_star = cJSON_CreateObject();
+
+		cJSON* tmpArr = cJSON_AddArrayToObject(json_star,"MassCenter");
+
+		sprintf(tmp, "%d", found_stars[star]->centerRow);
+		cJSON_AddItemToArray(tmpArr, cJSON_CreateString(tmp));
+
+		sprintf(tmp, "%d", found_stars[star]->centerCol);
+		cJSON_AddItemToArray(tmpArr, cJSON_CreateString(tmp));
+
+
+
+		sprintf(tmp, "%d",  found_stars[star]->pixelCount);
+		cJSON_AddStringToObject(json_star, "Pixels", tmp);
+
+
+		cJSON* tmpObj = cJSON_AddObjectToObject(json_star,"PixelArray");
+
+		for(int pixel=0; pixel<found_stars[star]->pixelCount; ++pixel)
+		{
+			sprintf(tmp, "Pixel%d", pixel + 1);
+			cJSON* tmpArrPx = cJSON_AddArrayToObject(tmpObj, tmp);
+
+			sprintf(tmp, "%d", found_stars[star]->pixels[pixel]->row);
+			cJSON_AddItemToArray(tmpArrPx, cJSON_CreateString(tmp));
+
+			sprintf(tmp, "%d", found_stars[star]->pixels[pixel]->col);
+			cJSON_AddItemToArray(tmpArrPx, cJSON_CreateString(tmp));
+
+			sprintf(tmp, "%1.3f", found_stars[star]->pixels[pixel]->intensity_normalized);
+			cJSON_AddItemToArray(tmpArrPx, cJSON_CreateString(tmp));
+		}
+
+		sprintf(tmp, "Star%d", (star+1));
+		cJSON_AddItemToObject(starArray, tmp, json_star);
+
 
 		//Select minimal star size (row or col) for cross line
 		int crossLineLen = (found_stars[star]->sizeCol > found_stars[star]->sizeRow)?found_stars[star]->sizeRow:found_stars[star]->sizeCol;
@@ -500,6 +573,8 @@ int main(int argc, char** argv)
 						COLOR_STAR_CENTER);
 	}
 
+
+	fprintf(fJsonReport, cJSON_Print(json_report));
 
 	bmp_img_write(&bmp_output, out_image_name);
 
