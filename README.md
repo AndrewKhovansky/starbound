@@ -14,6 +14,7 @@ starbound.exe sky.bmp 0.15 12 - absolute intensity 0.15, min size 12px
 
 Output:  
 	1) Text report with filename *file_name*_report.txt  
-	2) BMP image with filename *file_name*_report.bmp  
+	2) JSON-formatted report with filename *file_name*_report.json  
+	3) BMP image with filename *file_name*_report.bmp  
 
 
