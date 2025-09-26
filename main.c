@@ -118,6 +118,9 @@ int main(int argc, char** argv)
 
 
 
+	printf("\nStarBound v0.2\n");
+	fflush(stdout);
+
 
 	if(argc != 4)
 	{
@@ -577,6 +580,11 @@ int main(int argc, char** argv)
 	fprintf(fJsonReport, cJSON_Print(json_report));
 
 	bmp_img_write(&bmp_output, out_image_name);
+
+
+	printf("\nFinished parsing %s.\n", argv[1]);
+	fflush(stdout);
+
 
 	return 0;
 }
