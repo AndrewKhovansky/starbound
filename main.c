@@ -71,7 +71,7 @@ int stars_count = 0;
 
 void inline __attribute__((always_inline)) img_draw_pixel(bmp_img* img, int row, int col, unsigned int rgb)
 {
-	/*if(row < 0)
+	if(row < 0)
 		return;
 
 	if(row >= img->img_header.biHeight)
@@ -81,7 +81,7 @@ void inline __attribute__((always_inline)) img_draw_pixel(bmp_img* img, int row,
 		return;
 
 	if(col >= img->img_header.biWidth)
-		return;*/
+		return;
 
 
 	bmp_pixel* px = (img->img_pixels[row] + col);
